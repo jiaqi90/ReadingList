@@ -249,14 +249,5 @@ def add_book(book_list_id):
 
         return jsonify(booklist = book_list_data.serialize()), 200
 
-# @app.route('/dev/<int:id>', methods = ['PUT'])
-# def update_dev(id):
-#     dev = Developer.query.get(id)
-#     dev.name = request.json.get('name', dev.name)
-#     dev.hireDate = request.json.get('hireDate',dev.name)
-#     dev.focus = request.json.get('focus', dev.focus)
-#     db.session.commit()
-#     return jsonify( { 'dev': dev } )
-
 if __name__ == '__main__':
     manager.run()
