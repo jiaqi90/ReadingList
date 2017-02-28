@@ -152,6 +152,8 @@ def create_booklist():
     #         data_all.append([book.title, book.author, book.category, book.cover_url, book.summary])
     #     return jsonify(books=data_all)
 
+
+#Add a book to a booklist
 @app.route('/booklist/<book_list_id>', methods = ['POST'])
 def add_book(book_list_id):
     if not request.get_json or not 'book_id' in request.json:
