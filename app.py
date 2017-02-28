@@ -21,9 +21,9 @@ class User(db.Model):
     url = db.Column(db.String())
     book_lists = db.relationship('BookList')
 
-association_table = db.Table('book_list_identifier',
-    db.Column('book_list_id', db.Integer, db.ForeignKey('book_list.id')),
-    db.Column('book_id', db.Integer, db.ForeignKey('book.id'))
+book_list_identifier = db.Table('book_list_identifier',
+    db.Column('book_id', db.Integer, db.ForeignKey('book.id')),
+    db.Column('book_list_id', db.Integer, db.ForeignKey('book_list.id'))
 )
 
 class BookList(db.Model):
@@ -32,7 +32,7 @@ class BookList(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     private_list = db.Column(db.Boolean(), unique=False, default=False);
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    books = db.relationship("Book", secondary=association_table, backref = db.backref('book_list', lazy = 'dynamic'))
+    #books = db.relationship("Book", secondary=book_list_identifier, backref = db.backref('booklist', lazy = 'dynamic'))
 
 class Book(db.Model):
     __tablename__ = 'book'
@@ -43,6 +43,7 @@ class Book(db.Model):
     category = db.Column(db.String())
     cover_url = db.Column(db.String())
     summary = db.Column(db.String())
+    booklists = db.relationship("BookList", secondary=book_list_identifier, backref = db.backref('booklist', lazy = 'dynamic'))
 
 
 #import pdb;pdb.set_trace()
@@ -138,6 +139,40 @@ def create_booklist():
     data = BookList.query.filter_by(id=new_book_list.id).first()
 
     result = [data.private_list, data.user_id]
+    return jsonify(user=result), 200
+
+    # #GET all the public booklists
+    # @app.route('/booklist', methods=['GET'])
+    # def getPublicBooks():  
+    #     data = BookList.query.all()
+    #     data_all = []
+    #     for bookList in data:
+    #         if bookList.private_id:
+    #             bookData = Book.query.filter_by(id=bookList.user_id).first()
+    #         data_all.append([book.title, book.author, book.category, book.cover_url, book.summary])
+    #     return jsonify(books=data_all)
+
+@app.route('/booklist/<book_list_id>', methods = ['POST'])
+def add_book(book_list_id):
+    if not request.get_json or not 'book_id' in request.json:
+        return jsonify({'Error': "Missing Parameters"}), 400
+
+    book_id = request.get_json()["book_id"]
+
+    book_list_data = BookList.query.filter_by(id=book_list_id).first()
+    book_data = Book.query.filter_by(id=book_id).first()
+
+    try:
+        book_list_data.booklist.append(book_data)
+        db.session.commit()
+    except:
+        db.session.rollback();
+        db.session.flush()
+        return jsonify({'Error': "DB Error"}), 400
+
+    result = [];
+    for book in book_list_data.booklist:
+        result.append([book.title, book.author, book.category, book.cover_url, book.summary])
     return jsonify(user=result), 200
 
 if __name__ == '__main__':

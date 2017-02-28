@@ -1,18 +1,31 @@
 from app import db
-from sqlalchemy.dialects.postgresql import JSON
 
-class Result(db.Model):
-    __tablename__ = 'results'
+class User(db.Model):
+    __tablename__ = 'user'
 
     id = db.Column(db.Integer, primary_key=True)
     url = db.Column(db.String())
-    result_all = db.Column(JSON)
-    result_no_stop_words = db.Column(JSON)
+    book_lists = db.relationship('BookList')
 
-    def __init__(self, url, result_all, result_no_stop_words):
-        self.url = url
-        self.result_all = result_all
-        self.result_no_stop_words = result_no_stop_words
+association_table = db.Table('book_list_identifier',
+    db.Column('book_list_id', db.Integer, db.ForeignKey('book_list.id')),
+    db.Column('book_id', db.Integer, db.ForeignKey('book.id'))
+)
 
-    def __repr__(self):
-        return '<id {}>'.format(self.id)
+class BookList(db.Model):
+    __tablename__ = 'book_list'
+
+    id = db.Column(db.Integer, primary_key=True)
+    private_list = db.Column(db.Boolean(), unique=False, default=False);
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    books = db.relationship("Book", secondary=association_table, backref = db.backref('book_list', lazy = 'dynamic'))
+
+class Book(db.Model):
+    __tablename__ = 'book'
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String())
+    author = db.Column(db.String())
+    category = db.Column(db.String())
+    cover_url = db.Column(db.String())
+    summary = db.Column(db.String())
