@@ -81,6 +81,7 @@ def requires_auth(f):
 
 
 @app.route('/books', methods=['GET'])
+@requires_auth
 def getBooks(*args, **kwargs):
     data = Book.query.all()
     data_all = []
@@ -89,11 +90,10 @@ def getBooks(*args, **kwargs):
     return jsonify(books=[e.serialize() for e in data])
 
 @app.route('/books', methods = ['POST'])
-def create_book():
+@requires_auth
+def create_book(*args, **kwargs):
     if not request.get_json or not 'title' in request.json or not 'author' in request.json or not 'category' in request.json or not 'cover_url' in request.json or not 'summary' in request.json:
         return jsonify({'Error': "Missing Parameters"}), 400
-        #response.status_code = 400
-        #return status_code
     elif len(request.get_json()["summary"]) < 140:
         return jsonify({'Value Error': "Min Length Summary Not Reached"}), 400
 
@@ -113,6 +113,35 @@ def create_book():
         return jsonify({'Error': "DB Error"}), 400
 
     return jsonify(book=newBook.serialize()), 200
+
+@app.route('/books', methods = ['PUT'])
+@requires_auth
+def update_book(*args, **kwargs):
+    if not request.get_json or not 'id' in request.json or not 'title' in request.json or not 'author' in request.json or not 'category' in request.json or not 'cover_url' in request.json or not 'summary' in request.json:
+        return jsonify({'Error': "Missing Parameters"}), 400
+    elif len(request.get_json()["summary"]) < 140:
+        return jsonify({'Value Error': "Min Length Summary Not Reached"}), 400
+
+    import pdb;pdb.set_trace();
+    book_id = request.get_json()["id"]
+    title = request.get_json()["title"]
+    author = request.get_json()["author"]
+    category = request.get_json()["category"]
+    cover_url = request.get_json()["cover_url"]
+    summary = request.get_json()["summary"]
+
+    try:
+        book = Book.query.filter_by(id=book_id).first()
+        book.title = title
+        book.author = author
+        book.category = category
+        book.cover_url = cover_url
+        book.summary = summary
+        db.session.commit()
+    except:
+        return jsonify( { 'Error': "Failed to Update Book" } )
+
+    return jsonify(book=book.serialize()), 200
 
 
 @app.route('/login', methods = ['POST'])
@@ -168,24 +197,18 @@ def create_user():
 
     return jsonify(user=newUser.serialize()), 200
 
-@app.route('/booklist/private', methods = ['GET'])
-@requires_auth
-def get_private_booklist(*args, **kwargs):
-    user = User.query.filter(User.id == kwargs.get('user_id', 0)).first()
-    booklists = [book_list for book_list in user.book_lists if book_list.private_list == True]
-
-    return jsonify(data = [book_list.serialize() for book_list in user.book_lists])
-
 @app.route('/booklist', methods = ['GET'])
 @requires_auth
 def get_booklist(*args, **kwargs):
+    import pdb;pdb.set_trace()
     books = BookList.query.filter(or_(BookList.private_list == False, BookList.user_id == kwargs.get('user_id')))
 
     return jsonify(data = [book_list.serialize() for book_list in books])
 
-@app.route('/booklist', methods = ['POST', 'DELETE'])
+@app.route('/booklist', methods = ['POST'])
 @requires_auth
-def create_delete_booklist(*args, **kwargs):
+def create_booklist(*args, **kwargs):
+    # import pdb;pdb.set_trace()
     if request.method == 'POST':
         if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs:
             return jsonify({'Error': "Missing Parameters"}), 400
@@ -203,7 +226,40 @@ def create_delete_booklist(*args, **kwargs):
             return jsonify({'Error': "DB Error"}), 400
 
         return jsonify(data=new_book_list.serialize()), 200
-    elif request.method == 'DELETE':
+
+@app.route('/booklist', methods = ['PUT'])
+@requires_auth
+def update_booklist(*args, **kwargs):
+    # import pdb;pdb.set_trace()
+        if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
+            return jsonify({'Error': "Missing Parameters"}), 400
+
+        private_list = request.get_json()["private_list"]
+        user_id = kwargs.get('user_id')
+        list_id = request.get_json()["id"]
+        update_book_list = BookList.query.filter_by(user_id = user_id)
+        found = False
+        for potential_book_list in update_book_list:
+            if potential_book_list.id == list_id:
+                found = True
+                break
+
+        if(found == False):
+            return jsonify({'Error': "No Permissions"}), 400
+
+        try:
+            book_list = BookList.query.filter_by(id=list_id).first()
+            book_list.private_list = private_list;
+            db.session.commit();
+        except:
+            return jsonify( { 'Error': "Failed to Update BookList" } )
+
+        return jsonify(data=book_list.serialize())
+
+@app.route('/booklist', methods = ['DELETE'])
+@requires_auth
+def delete_booklist(*args, **kwargs):
+    if request.method == 'DELETE':
         if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
             return jsonify({'Error': "Missing Parameters"}), 400
 
@@ -211,25 +267,33 @@ def create_delete_booklist(*args, **kwargs):
         user_id = kwargs.get('user_id')
         list_id = request.get_json()["id"]
         delete_book_list = BookList.query.filter_by(user_id = user_id)
-        found = false;
+        found = False
         for potential_book_list in delete_book_list:
             if potential_book_list.id == list_id:
-                found = true
-                break;
+                found = True
+                break
 
         if(found == False):
             return jsonify({'Error': "No Permissions"}), 400
         try: 
-            BookList.query.filter_by(id=book_list_id).delete() 
+            BookList.query.filter_by(id=list_id).delete() 
             db.session.commit();
         except:
             return jsonify( { 'Error': "Failed to Delete BookList" } )
 
         return jsonify( { 'result': True } )
     
+@app.route('/booklist/private', methods = ['GET'])
+@requires_auth
+def get_private_booklist(*args, **kwargs):
+    user = User.query.filter(User.id == kwargs.get('user_id', 0)).first()
+    booklists = [book_list for book_list in user.book_lists if book_list.private_list == True]
+
+    return jsonify(data = [book_list.serialize() for book_list in user.book_lists])
 
 #Add a book to a booklist
 @app.route('/booklist/<book_list_id>', methods = ['POST'])
+# @requires_auth
 def add_book(book_list_id):
         if not request.get_json or not 'book_id' in request.json:
             return jsonify({'Error': "Missing Parameters"}), 400
@@ -248,6 +312,29 @@ def add_book(book_list_id):
             return jsonify({'Error': "DB Error"}), 400
 
         return jsonify(booklist = book_list_data.serialize()), 200
+
+# #remove a book to a booklist
+# @app.route('/booklist/<book_list_id>', methods = ['DELETE'])
+# # @requires_auth
+# def add_book(book_list_id):
+#         if not request.get_json or not 'book_id' in request.json:
+#             return jsonify({'Error': "Missing Parameters"}), 400
+
+#         book_id = request.get_json()["book_id"]
+
+#         book_list_data = BookList.query.filter_by(id=book_list_id).first()
+#         book_data = Book.query.filter_by(id=book_id).first()
+#         import pdb;pdb.set_trace();
+
+#         try:
+#             book_data.booklists.append(book_list_data)
+#             db.session.commit()
+#         except:
+#             db.session.rollback();
+#             db.session.flush()
+#             return jsonify({'Error': "DB Error"}), 400
+
+#         return jsonify(booklist = book_list_data.serialize()), 200
 
 if __name__ == '__main__':
     manager.run()
