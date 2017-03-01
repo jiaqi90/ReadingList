@@ -9,6 +9,14 @@ from config import app, manager, db, SECRET
 
 from models import User, BookList, Book
 
+def isUserBookList(user_id, book_list_to_search, booklist_id):
+    found = False
+    for potential_book_list in book_list_to_search:
+        if potential_book_list.id == int(booklist_id):
+            found = True
+            break
+    return found
+
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -146,6 +154,13 @@ def get_booklist(*args, **kwargs):
 
     return jsonify(data = [book_list.serialize() for book_list in books])
 
+@app.route('/booklist/<booklist_id>', methods = ['GET'])
+@requires_auth
+def get_booklist_id(booklist_id, *args, **kwargs):
+    books = BookList.query.filter(or_(BookList.private_list == False, BookList.user_id == kwargs.get('user_id'))).filter(BookList.id == booklist_id)
+
+    return jsonify(data = [book_list.serialize() for book_list in books])
+
 
 @app.route('/booklist', methods = ['POST'])
 @requires_auth
@@ -167,55 +182,48 @@ def create_booklist(*args, **kwargs):
 
     return jsonify(data=new_book_list.serialize()), 200
 
-@app.route('/booklist', methods = ['PUT'])
+@app.route('/booklist/<booklist_id>', methods = ['PUT'])
 @requires_auth
-def update_booklist(*args, **kwargs):
-    if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
+def update_booklist(booklist_id, *args, **kwargs):
+    if not request.get_json or not 'user_id' in kwargs:
         return jsonify({'Error': "Missing Parameters"}), 400
 
-    private_list = request.get_json()["private_list"]
+    private_list = request.get_json().get("private_list")
     user_id = kwargs.get('user_id')
-    list_id = request.get_json()["id"]
+
     update_book_list = BookList.query.filter_by(user_id = user_id)
-    found = False
-    for potential_book_list in update_book_list:
-        if potential_book_list.id == list_id:
-            found = True
-            break
+
+    found = isUserBookList(user_id, update_book_list, booklist_id)
 
     if(found == False):
         return jsonify({'Error': "No Permissions"}), 400
 
     try:
-        book_list = BookList.query.filter_by(id=list_id).first()
-        book_list.private_list = private_list;
+        book_list = BookList.query.filter_by(id=booklist_id).first()
+        book_list.private_list = request.get_json().get('private_list', book_list.private_list)
         db.session.commit();
     except:
         return jsonify( { 'Error': "Failed to Update BookList" } )
 
     return jsonify(data=book_list.serialize())
 
-@app.route('/booklist', methods = ['DELETE'])
+@app.route('/booklist/<booklist_id>', methods = ['DELETE'])
 @requires_auth
-def delete_booklist(*args, **kwargs):
+def delete_booklist(booklist_id, *args, **kwargs):
     if request.method == 'DELETE':
-        if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
+        if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs:
             return jsonify({'Error': "Missing Parameters"}), 400
 
         private_list = request.get_json()["private_list"]
         user_id = kwargs.get('user_id')
-        list_id = request.get_json()["id"]
         delete_book_list = BookList.query.filter_by(user_id = user_id)
-        found = False
-        for potential_book_list in delete_book_list:
-            if potential_book_list.id == list_id:
-                found = True
-                break
+
+        found = isUserBookList(user_id, delete_book_list, booklist_id)
 
         if(found == False):
             return jsonify({'Error': "No Permissions"}), 400
         try: 
-            BookList.query.filter_by(id=list_id).delete() 
+            BookList.query.filter_by(id=booklist_id).delete() 
             db.session.commit();
         except:
             return jsonify( { 'Error': "Failed to Delete BookList" } )
@@ -244,6 +252,13 @@ def add_book(book_list_id, *args, **kwargs):
 
         book_data = Book.query.filter_by(id=book_id).first()
 
+        user_id = kwargs.get('user_id')
+        search_book_list = BookList.query.filter_by(user_id = user_id)
+
+        found = isUserBookList(user_id, search_book_list, book_list_id)
+        if(found == False):
+            return jsonify({'Error': "No Permissions"}), 400
+
         try:
             user_book_list.books.append(book_data)
             db.session.commit()
@@ -259,6 +274,13 @@ def add_book(book_list_id, *args, **kwargs):
 def delete_book(book_list_id, book_id, *args, **kwargs):
     book_list = BookList.query.filter_by(id=book_list_id).first()
     book = Book.query.filter_by(id=book_id).first()
+
+    user_id = kwargs.get('user_id')
+    search_book_list = BookList.query.filter_by(user_id = user_id)
+
+    found = isUserBookList(user_id, search_book_list, book_list_id)
+    if(found == False):
+        return jsonify({'Error': "No Permissions"}), 400
 
     try:
         if book not in book_list.books:
