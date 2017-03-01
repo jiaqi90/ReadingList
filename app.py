@@ -1,65 +1,13 @@
 from functools import wraps
 from flask import request, Response, Flask, jsonify
-from flask_script import Manager
-from flask_migrate import Migrate, MigrateCommand
-from flask_sqlalchemy import SQLAlchemy
 import bcrypt
 import json
 import jwt
+from sqlalchemy import or_, and_
 
-SECRET = 'a_secret'
+from config import app, manager, db, SECRET
 
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://root:pass@localhost/reading_list_db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-migrate = Migrate(app, db)
-manager = Manager(app)
-manager.add_command('db', MigrateCommand)
-
-class User(db.Model):
-    __tablename__ = 'user'
-
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(255), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
-    book_lists = db.relationship("BookList", backref = db.backref('booklist'))
-
-    def serialize(self):
-        return {'id': self.id, 'username': self.username, 'book_lists': [book_list.serialize() for book_list in self.book_lists]}
-
-book_list_identifier = db.Table('book_list_identifier',
-    db.Column('book_id', db.Integer, db.ForeignKey('book.id')),
-    db.Column('book_list_id', db.Integer, db.ForeignKey('book_list.id'))
-)
-
-class BookList(db.Model):
-    __tablename__ = 'book_list'
-
-    id = db.Column(db.Integer, primary_key=True)
-    private_list = db.Column(db.Boolean(), default=False);
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    books = db.relationship("Book", secondary=book_list_identifier, backref = db.backref('book_list', lazy = 'dynamic'))
-
-    def serialize(self):
-        return {'id': self.id, 'private_list': self.private_list, 'user_id': self.user_id}
-
-class Book(db.Model):
-    __tablename__ = 'book'
-
-    id = db.Column(db.Integer, primary_key=True)
-    isbn = db.Column(db.Integer(), unique=True, nullable=False)
-    title = db.Column(db.String(), nullable=False)
-    author = db.Column(db.String(), nullable=False)
-    category = db.Column(db.String(), nullable=False)
-    cover_url = db.Column(db.String(), nullable=False)
-    summary = db.Column(db.String(140), nullable=False)
-    booklists = db.relationship("BookList", secondary=book_list_identifier, backref = db.backref('book_list', lazy = 'dynamic'))
-
-    def serialize(self):
-        return {'id': self.id, 'isbn': self.isbn, 'title': self.title, 'author': self.author, 'category': self.category, 
-            'cover_url': self.cover_url, 'summary': self.summary}
-
+from models import User, BookList, Book
 
 def requires_auth(f):
     @wraps(f)
@@ -194,30 +142,30 @@ def create_user():
 @app.route('/booklist', methods = ['GET'])
 @requires_auth
 def get_booklist(*args, **kwargs):
-    books = BookList.query.filter(or_(BookList.private_list == False, BookList.user_id == kwargs.get('user_id')))
+    books = BookList.query.filter(or_(BookList.private_list == False, BookList.user_id == kwargs.get('user_id')))\
 
     return jsonify(data = [book_list.serialize() for book_list in books])
+
 
 @app.route('/booklist', methods = ['POST'])
 @requires_auth
 def create_booklist(*args, **kwargs):
-    if request.method == 'POST':
-        if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs:
-            return jsonify({'Error': "Missing Parameters"}), 400
+    if not request.get_json or not 'user_id' in kwargs:
+        return jsonify({'Error': "Missing Parameters"}), 400
 
-        private_list = request.get_json()["private_list"]
-        user_id = kwargs.get('user_id')
+    private_list = request.get_json().get("private_list")
+    user_id = kwargs.get('user_id')
 
-        new_book_list = BookList(private_list = private_list, user_id = user_id)
-        try:
-            db.session.add(new_book_list)
-            db.session.commit()
-        except:
-            db.session.rollback();
-            db.session.flush();
-            return jsonify({'Error': "DB Error"}), 400
+    new_book_list = BookList(private_list = private_list, user_id = user_id)
+    try:
+        db.session.add(new_book_list)
+        db.session.commit()
+    except:
+        db.session.rollback();
+        db.session.flush();
+        return jsonify({'Error': "DB Error"}), 400
 
-        return jsonify(data=new_book_list.serialize()), 200
+    return jsonify(data=new_book_list.serialize()), 200
 
 @app.route('/booklist', methods = ['PUT'])
 @requires_auth
@@ -283,7 +231,7 @@ def get_private_booklist(*args, **kwargs):
     return jsonify(data = [book_list.serialize() for book_list in user.book_lists])
 
 #Add a book to a booklist
-@app.route('/booklist/<book_list_id>', methods = ['POST'])
+@app.route('/booklist/<book_list_id>/books', methods = ['POST'])
 @requires_auth
 def add_book(book_list_id, *args, **kwargs):
         if not request.get_json or not 'book_id' in request.json:
@@ -292,38 +240,31 @@ def add_book(book_list_id, *args, **kwargs):
         book_id = request.get_json()["book_id"]
 
         user_id = kwargs.get('user_id')
-        add_book_list = BookList.query.filter_by(user_id = user_id)
-        for potential_book_list in add_book_list:
-            if potential_book_list.id == list_id:
-                found = True
-                break
+        user_book_list = BookList.query.filter_by(user_id=user_id).filter_by(id=book_list_id).first()
 
-        book_list_data = BookList.query.filter_by(id=book_list_id).first()
         book_data = Book.query.filter_by(id=book_id).first()
 
         try:
-            book_data.booklists.append(book_list_data)
+            user_book_list.books.append(book_data)
             db.session.commit()
         except:
             db.session.rollback();
             db.session.flush()
             return jsonify({'Error': "DB Error"}), 400
 
-        return jsonify(booklist = book_list_data.serialize()), 200
+        return jsonify(booklist = user_book_list.serialize()), 200
 
-@app.route('/booklist/<book_list_id>', methods = ['DELETE'])
+@app.route('/booklist/<book_list_id>/books/<book_id>', methods = ['DELETE'])
 @requires_auth
-def delete_book(book_list_id):
-    if not request.get_json or not 'book_id' in request.json:
-        return jsonify({'Error': "Missing Parameters"}), 400
-
-    book_id = request.get_json()["book_id"]
-
-    book_list_data = BookList.query.filter_by(id=book_list_id).first()
-    book_data = Book.query.filter_by(id=book_id).first()
+def delete_book(book_list_id, book_id, *args, **kwargs):
+    book_list = BookList.query.filter_by(id=book_list_id).first()
+    book = Book.query.filter_by(id=book_id).first()
 
     try:
-        book_data.booklists.remove(book_list_data)
+        if book not in book_list.books:
+            return jsonify({'Error': 'Book not in list'}), 404
+        
+        book_list.books.remove(book)
         db.session.commit()
     except:
         db.session.rollback();
