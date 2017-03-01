@@ -1,13 +1,8 @@
-
 from functools import wraps
-from flask import request, Response
-from flask import Flask 
-from flask import request
-from flask import jsonify
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import or_
+from flask import request, Response, Flask, jsonify
 from flask_script import Manager
 from flask_migrate import Migrate, MigrateCommand
+from flask_sqlalchemy import SQLAlchemy
 import bcrypt
 import json
 import jwt
@@ -26,8 +21,8 @@ class User(db.Model):
     __tablename__ = 'user'
 
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(255))
-    password_hash = db.Column(db.String(255))
+    username = db.Column(db.String(255), unique=True, nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
     book_lists = db.relationship("BookList", backref = db.backref('booklist'))
 
     def serialize(self):
@@ -42,8 +37,8 @@ class BookList(db.Model):
     __tablename__ = 'book_list'
 
     id = db.Column(db.Integer, primary_key=True)
-    private_list = db.Column(db.Boolean(), unique=False, default=False);
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    private_list = db.Column(db.Boolean(), default=False);
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     books = db.relationship("Book", secondary=book_list_identifier, backref = db.backref('book_list', lazy = 'dynamic'))
 
     def serialize(self):
@@ -53,15 +48,16 @@ class Book(db.Model):
     __tablename__ = 'book'
 
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String())
-    author = db.Column(db.String())
-    category = db.Column(db.String())
-    cover_url = db.Column(db.String())
-    summary = db.Column(db.String())
+    isbn = db.Column(db.Integer(), unique=True, nullable=False)
+    title = db.Column(db.String(), nullable=False)
+    author = db.Column(db.String(), nullable=False)
+    category = db.Column(db.String(), nullable=False)
+    cover_url = db.Column(db.String(), nullable=False)
+    summary = db.Column(db.String(140), nullable=False)
     booklists = db.relationship("BookList", secondary=book_list_identifier, backref = db.backref('book_list', lazy = 'dynamic'))
 
     def serialize(self):
-        return {'id': self.id, 'title': self.title, 'author': self.author, 'category': self.category, 
+        return {'id': self.id, 'isbn': self.isbn, 'title': self.title, 'author': self.author, 'category': self.category, 
             'cover_url': self.cover_url, 'summary': self.summary}
 
 
@@ -92,18 +88,19 @@ def getBooks(*args, **kwargs):
 @app.route('/books', methods = ['POST'])
 @requires_auth
 def create_book(*args, **kwargs):
-    if not request.get_json or not 'title' in request.json or not 'author' in request.json or not 'category' in request.json or not 'cover_url' in request.json or not 'summary' in request.json:
+    if not request.get_json:
         return jsonify({'Error': "Missing Parameters"}), 400
-    elif len(request.get_json()["summary"]) < 140:
-        return jsonify({'Value Error': "Min Length Summary Not Reached"}), 400
 
-    title = request.get_json()["title"]
-    author = request.get_json()["author"]
-    category = request.get_json()["category"]
-    cover_url = request.get_json()["cover_url"]
-    summary = request.get_json()["summary"]
+    book_data = request.get_json()
 
-    newBook = Book(title = title, author = author, category = category, cover_url = cover_url, summary = summary)
+    title = book_data.get("title")
+    isbn = book_data.get("isbn")
+    author = book_data.get("author")
+    category = book_data.get("category")
+    cover_url = book_data.get("cover_url")
+    summary = book_data.get("summary")
+
+    newBook = Book(title = title, isbn = isbn, author = author, category = category, cover_url = cover_url, summary = summary)
     try:
         db.session.add(newBook)
         db.session.commit()
@@ -114,34 +111,31 @@ def create_book(*args, **kwargs):
 
     return jsonify(book=newBook.serialize()), 200
 
-@app.route('/books', methods = ['PUT'])
+@app.route('/books/<book_id>', methods = ['GET', 'PUT'])
 @requires_auth
-def update_book(*args, **kwargs):
-    if not request.get_json or not 'id' in request.json or not 'title' in request.json or not 'author' in request.json or not 'category' in request.json or not 'cover_url' in request.json or not 'summary' in request.json:
-        return jsonify({'Error': "Missing Parameters"}), 400
-    elif len(request.get_json()["summary"]) < 140:
-        return jsonify({'Value Error': "Min Length Summary Not Reached"}), 400
-
-    import pdb;pdb.set_trace();
-    book_id = request.get_json()["id"]
-    title = request.get_json()["title"]
-    author = request.get_json()["author"]
-    category = request.get_json()["category"]
-    cover_url = request.get_json()["cover_url"]
-    summary = request.get_json()["summary"]
-
+def update_book(book_id, *args, **kwargs):
     try:
         book = Book.query.filter_by(id=book_id).first()
-        book.title = title
-        book.author = author
-        book.category = category
-        book.cover_url = cover_url
-        book.summary = summary
-        db.session.commit()
-    except:
-        return jsonify( { 'Error': "Failed to Update Book" } )
+        if book == None:
+            return jsonify({'Error': "Book not found"}), 404
 
-    return jsonify(book=book.serialize()), 200
+        if request.method == 'GET':
+            return jsonify(data=book.serialize()), 200
+        elif request.method == 'PUT':
+            book_data = request.get_json()
+
+            book.title = book_data.get('title', book.title)
+            book.isbn = book_data.get('isbn', book.isbn)
+            book.author = book_data.get('author', book.author)
+            book.category = book_data.get('category', book.category)
+            book.cover_url = book_data.get('cover_url', book.cover_url)
+            book.summary = book_data.get('summary', book.summary)
+            db.session.commit()
+
+            return jsonify(data=book.serialize()), 200
+    except:
+        return jsonify({'Error': "Failed to Update Book" })
+
 
 
 @app.route('/login', methods = ['POST'])
@@ -200,7 +194,6 @@ def create_user():
 @app.route('/booklist', methods = ['GET'])
 @requires_auth
 def get_booklist(*args, **kwargs):
-    import pdb;pdb.set_trace()
     books = BookList.query.filter(or_(BookList.private_list == False, BookList.user_id == kwargs.get('user_id')))
 
     return jsonify(data = [book_list.serialize() for book_list in books])
@@ -208,7 +201,6 @@ def get_booklist(*args, **kwargs):
 @app.route('/booklist', methods = ['POST'])
 @requires_auth
 def create_booklist(*args, **kwargs):
-    # import pdb;pdb.set_trace()
     if request.method == 'POST':
         if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs:
             return jsonify({'Error': "Missing Parameters"}), 400
@@ -230,31 +222,30 @@ def create_booklist(*args, **kwargs):
 @app.route('/booklist', methods = ['PUT'])
 @requires_auth
 def update_booklist(*args, **kwargs):
-    # import pdb;pdb.set_trace()
-        if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
-            return jsonify({'Error': "Missing Parameters"}), 400
+    if not request.get_json or not 'private_list' in request.json or not 'user_id' in kwargs or not 'id' in request.json:
+        return jsonify({'Error': "Missing Parameters"}), 400
 
-        private_list = request.get_json()["private_list"]
-        user_id = kwargs.get('user_id')
-        list_id = request.get_json()["id"]
-        update_book_list = BookList.query.filter_by(user_id = user_id)
-        found = False
-        for potential_book_list in update_book_list:
-            if potential_book_list.id == list_id:
-                found = True
-                break
+    private_list = request.get_json()["private_list"]
+    user_id = kwargs.get('user_id')
+    list_id = request.get_json()["id"]
+    update_book_list = BookList.query.filter_by(user_id = user_id)
+    found = False
+    for potential_book_list in update_book_list:
+        if potential_book_list.id == list_id:
+            found = True
+            break
 
-        if(found == False):
-            return jsonify({'Error': "No Permissions"}), 400
+    if(found == False):
+        return jsonify({'Error': "No Permissions"}), 400
 
-        try:
-            book_list = BookList.query.filter_by(id=list_id).first()
-            book_list.private_list = private_list;
-            db.session.commit();
-        except:
-            return jsonify( { 'Error': "Failed to Update BookList" } )
+    try:
+        book_list = BookList.query.filter_by(id=list_id).first()
+        book_list.private_list = private_list;
+        db.session.commit();
+    except:
+        return jsonify( { 'Error': "Failed to Update BookList" } )
 
-        return jsonify(data=book_list.serialize())
+    return jsonify(data=book_list.serialize())
 
 @app.route('/booklist', methods = ['DELETE'])
 @requires_auth
@@ -293,12 +284,19 @@ def get_private_booklist(*args, **kwargs):
 
 #Add a book to a booklist
 @app.route('/booklist/<book_list_id>', methods = ['POST'])
-# @requires_auth
-def add_book(book_list_id):
+@requires_auth
+def add_book(book_list_id, *args, **kwargs):
         if not request.get_json or not 'book_id' in request.json:
             return jsonify({'Error': "Missing Parameters"}), 400
 
         book_id = request.get_json()["book_id"]
+
+        user_id = kwargs.get('user_id')
+        add_book_list = BookList.query.filter_by(user_id = user_id)
+        for potential_book_list in add_book_list:
+            if potential_book_list.id == list_id:
+                found = True
+                break
 
         book_list_data = BookList.query.filter_by(id=book_list_id).first()
         book_data = Book.query.filter_by(id=book_id).first()
@@ -313,28 +311,26 @@ def add_book(book_list_id):
 
         return jsonify(booklist = book_list_data.serialize()), 200
 
-# #remove a book to a booklist
-# @app.route('/booklist/<book_list_id>', methods = ['DELETE'])
-# # @requires_auth
-# def add_book(book_list_id):
-#         if not request.get_json or not 'book_id' in request.json:
-#             return jsonify({'Error': "Missing Parameters"}), 400
+@app.route('/booklist/<book_list_id>', methods = ['DELETE'])
+@requires_auth
+def delete_book(book_list_id):
+    if not request.get_json or not 'book_id' in request.json:
+        return jsonify({'Error': "Missing Parameters"}), 400
 
-#         book_id = request.get_json()["book_id"]
+    book_id = request.get_json()["book_id"]
 
-#         book_list_data = BookList.query.filter_by(id=book_list_id).first()
-#         book_data = Book.query.filter_by(id=book_id).first()
-#         import pdb;pdb.set_trace();
+    book_list_data = BookList.query.filter_by(id=book_list_id).first()
+    book_data = Book.query.filter_by(id=book_id).first()
 
-#         try:
-#             book_data.booklists.append(book_list_data)
-#             db.session.commit()
-#         except:
-#             db.session.rollback();
-#             db.session.flush()
-#             return jsonify({'Error': "DB Error"}), 400
+    try:
+        book_data.booklists.remove(book_list_data)
+        db.session.commit()
+    except:
+        db.session.rollback();
+        db.session.flush()
+        return jsonify({'Error': "DB Error"}), 400
 
-#         return jsonify(booklist = book_list_data.serialize()), 200
+    return jsonify( { 'result': True } )
 
 if __name__ == '__main__':
     manager.run()
